@@ -138,6 +138,14 @@ jobs:
 
           ls -la
 
+      - name: Create gradle.properties
+        run: |
+          cat > gradle.properties << 'PROPS'
+          android.useAndroidX=true
+          android.enableJetifier=true
+          org.gradle.jvmargs=-Xmx2048m
+          PROPS
+
       - name: Build APK
         run: |
           chmod +x gradlew 2>/dev/null || true
