@@ -1,0 +1,96 @@
+name: Build Exchange APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      pin:
+        description: 'Tenant PIN'
+        required: true
+      shop_name:
+        description: 'Shop Name'
+        required: true
+      base_url:
+        description: 'Base URL'
+        required: true
+        default: 'https://exchange.89-167-6-122.nip.io'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK packages
+        run: |
+          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Create TWA Config
+        run: |
+          cat > twa-manifest.json << EOF
+          {
+            "packageId": "com.exchange.shop${{ github.event.inputs.pin }}",
+            "host": "$(echo '${{ github.event.inputs.base_url }}' | sed 's/https:\/\///')",
+            "startUrl": "/pin/${{ github.event.inputs.pin }}",
+            "name": "${{ github.event.inputs.shop_name }}",
+            "launcherName": "${{ github.event.inputs.shop_name }}",
+            "display": "standalone",
+            "themeColor": "#4CAF50",
+            "backgroundColor": "#f4f7f6",
+            "enableNotifications": false,
+            "shortcuts": [],
+            "iconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
+            "maskableIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
+            "monochromeIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
+            "appVersion": "1.0.0",
+            "appVersionCode": 1,
+            "signingMode": "none",
+            "generatorApp": "bubblewrap",
+            "webManifestUrl": "${{ github.event.inputs.base_url }}/manifest/${{ github.event.inputs.pin }}.json",
+            "fallbackType": "customtabs",
+            "features": {},
+            "alphaDependencies": {"enabled": false},
+            "enableSiteSettingsShortcut": true,
+            "minSdkVersion": 21,
+            "orientation": "default"
+          }
+          EOF
+
+      - name: Build APK with Bubblewrap
+        run: |
+          mkdir -p apk_build
+          cd apk_build
+          cp ../twa-manifest.json twa-manifest.json
+          bubblewrap build --skipPwaValidation 2>&1 || true
+          find . -name "*.apk" | head -5
+
+      - name: Find APK
+        id: find_apk
+        run: |
+          APK=$(find . -name "*.apk" | head -1)
+          echo "apk_path=$APK" >> $GITHUB_OUTPUT
+          ls -lh $APK 2>/dev/null || echo "No APK found"
+
+      - name: Upload APK artifact
+        if: steps.find_apk.outputs.apk_path != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: exchange-app-${{ github.event.inputs.pin }}
+          path: ${{ steps.find_apk.outputs.apk_path }}
+          retention-days: 30
