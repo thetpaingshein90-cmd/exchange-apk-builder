@@ -29,72 +29,125 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install SDK
+      - name: Accept licenses & install packages
         run: |
           yes | sdkmanager --licenses > /dev/null 2>&1
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Bubblewrap & answer JDK prompt
+      - name: Create TWA Gradle project
         run: |
-          npm install -g @bubblewrap/cli
-          # Pre-configure bubblewrap to use system JDK (avoids interactive prompt)
-          mkdir -p ~/.bubblewrap
-          cat > ~/.bubblewrap/config.json << EOF
-          {
-            "jdkPath": "$JAVA_HOME",
-            "androidSdkPath": "$ANDROID_HOME"
-          }
-          EOF
-          cat ~/.bubblewrap/config.json
+          PIN="${{ github.event.inputs.pin }}"
+          SHOP="${{ github.event.inputs.shop_name }}"
+          BASE="${{ github.event.inputs.base_url }}"
+          HOST=$(echo "$BASE" | sed 's|https://||')
+          PKG="com.exchange.shop${PIN}"
+          
+          mkdir -p app/src/main/java/com/exchange/app
+          mkdir -p app/src/main/res/{values,xml,mipmap-hdpi,mipmap-mdpi,mipmap-xhdpi,mipmap-xxhdpi}
+          mkdir -p gradle/wrapper
 
-      - name: Create TWA manifest
-        run: |
-          HOST=$(echo '${{ github.event.inputs.base_url }}' | sed 's|https://||')
-          cat > twa-manifest.json << EOF
-          {
-            "packageId": "com.exchange.shop${{ github.event.inputs.pin }}",
-            "host": "${HOST}",
-            "startUrl": "/pin/${{ github.event.inputs.pin }}",
-            "name": "${{ github.event.inputs.shop_name }}",
-            "launcherName": "${{ github.event.inputs.shop_name }}",
-            "display": "standalone",
-            "themeColor": "#4CAF50",
-            "backgroundColor": "#f4f7f6",
-            "enableNotifications": false,
-            "shortcuts": [],
-            "iconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
-            "maskableIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
-            "monochromeIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
-            "appVersion": "1.0.0",
-            "appVersionCode": 1,
-            "signingMode": "none",
-            "generatorApp": "bubblewrap",
-            "webManifestUrl": "${{ github.event.inputs.base_url }}/manifest/${{ github.event.inputs.pin }}.json",
-            "fallbackType": "customtabs",
-            "features": {},
-            "alphaDependencies": {"enabled": false},
-            "enableSiteSettingsShortcut": true,
-            "minSdkVersion": 21,
-            "orientation": "default"
+          # settings.gradle
+          cat > settings.gradle << 'SETTINGS'
+          include ':app'
+          SETTINGS
+
+          # build.gradle (root)
+          cat > build.gradle << 'ROOT'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies { classpath 'com.android.tools.build:gradle:8.2.0' }
           }
-          EOF
+          allprojects { repositories { google(); mavenCentral() } }
+          ROOT
+
+          # app/build.gradle
+          cat > app/build.gradle << APPBUILD
+          apply plugin: 'com.android.application'
+          android {
+              compileSdkVersion 34
+              namespace '${PKG}'
+              defaultConfig {
+                  applicationId '${PKG}'
+                  minSdkVersion 21
+                  targetSdkVersion 34
+                  versionCode 1
+                  versionName '1.0'
+              }
+              buildTypes { release { minifyEnabled false } }
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+          }
+          dependencies {
+              implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+          }
+          APPBUILD
+
+          # AndroidManifest.xml
+          cat > app/src/main/AndroidManifest.xml << MANIFEST
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-permission android:name="android.permission.INTERNET"/>
+              <application
+                  android:label="${SHOP}"
+                  android:icon="@mipmap/ic_launcher"
+                  android:theme="@style/AppTheme"
+                  android:allowBackup="true">
+                  <activity android:name="com.google.androidbrowserhelper.trusted.LauncherActivity"
+                      android:exported="true">
+                      <meta-data android:name="android.support.customtabs.trusted.DEFAULT_URL"
+                          android:value="${BASE}/pin/${PIN}"/>
+                      <intent-filter android:autoVerify="true">
+                          <action android:name="android.intent.action.MAIN"/>
+                          <category android:name="android.intent.category.LAUNCHER"/>
+                      </intent-filter>
+                  </activity>
+              </application>
+          </manifest>
+          MANIFEST
+
+          # styles.xml
+          cat > app/src/main/res/values/styles.xml << 'STYLES'
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <style name="AppTheme" parent="android:Theme.Material.Light.NoActionBar">
+                  <item name="android:statusBarColor">#4CAF50</item>
+              </style>
+          </resources>
+          STYLES
+
+          # Download icon
+          curl -sL "${BASE}/static/icon-192.png" -o app/src/main/res/mipmap-hdpi/ic_launcher.png || true
+          cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-mdpi/ic_launcher.png || true
+          cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png || true
+          cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png || true
+
+          # gradle wrapper
+          curl -sL https://services.gradle.org/distributions/gradle-8.2-bin.zip -o /tmp/gradle.zip
+          unzip -qo /tmp/gradle.zip -d /tmp/gradle-dist
+          /tmp/gradle-dist/gradle-8.2/bin/gradle wrapper --gradle-version 8.2 2>/dev/null || true
+
+          cat > gradle/wrapper/gradle-wrapper.properties << 'PROPS'
+          distributionBase=GRADLE_USER_HOME
+          distributionPath=wrapper/dists
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.2-bin.zip
+          zipStoreBase=GRADLE_USER_HOME
+          zipStorePath=wrapper/dists
+          PROPS
+
+          ls -la
 
       - name: Build APK
         run: |
-          bubblewrap build --manifest ./twa-manifest.json --skipPwaValidation
-          find . -name "*.apk" -o -name "*.aab" | head -10
+          chmod +x gradlew 2>/dev/null || true
+          /tmp/gradle-dist/gradle-8.2/bin/gradle assembleRelease --no-daemon 2>&1
+          find . -name "*.apk" | head -5
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: exchange-app-${{ github.event.inputs.pin }}
-          path: |
-            **/*.apk
-            **/*.aab
+          path: "**/*.apk"
           if-no-files-found: warn
           retention-days: 30
