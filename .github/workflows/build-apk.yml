@@ -41,56 +41,48 @@ jobs:
         run: |
           sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Create TWA Config
+      - name: Build TWA APK
         run: |
-          cat > twa-manifest.json << EOF
-          {
-            "packageId": "com.exchange.shop${{ github.event.inputs.pin }}",
-            "host": "$(echo '${{ github.event.inputs.base_url }}' | sed 's/https:\/\///')",
-            "startUrl": "/pin/${{ github.event.inputs.pin }}",
-            "name": "${{ github.event.inputs.shop_name }}",
-            "launcherName": "${{ github.event.inputs.shop_name }}",
-            "display": "standalone",
-            "themeColor": "#4CAF50",
-            "backgroundColor": "#f4f7f6",
-            "enableNotifications": false,
-            "shortcuts": [],
-            "iconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
-            "maskableIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
-            "monochromeIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
-            "appVersion": "1.0.0",
-            "appVersionCode": 1,
-            "signingMode": "none",
-            "generatorApp": "bubblewrap",
-            "webManifestUrl": "${{ github.event.inputs.base_url }}/manifest/${{ github.event.inputs.pin }}.json",
-            "fallbackType": "customtabs",
-            "features": {},
-            "alphaDependencies": {"enabled": false},
-            "enableSiteSettingsShortcut": true,
-            "minSdkVersion": 21,
-            "orientation": "default"
-          }
-          EOF
+          mkdir -p apk_build && cd apk_build
+          
+          # Init bubblewrap project
+          bubblewrap init \
+            --manifest "${{ github.event.inputs.base_url }}/manifest/${{ github.event.inputs.pin }}.json" \
+            --directory . \
+            --skipPwaValidation \
+            --noInput 2>&1 || true
 
-      - name: Build APK with Bubblewrap
-        run: |
-          mkdir -p apk_build
-          cd apk_build
-          cp ../twa-manifest.json twa-manifest.json
+          # Show what was generated
+          ls -la
+          cat twa-manifest.json 2>/dev/null || true
+
+          # Build
           bubblewrap build --skipPwaValidation 2>&1 || true
-          find . -name "*.apk" | head -5
+          
+          # Find any APK
+          echo "=== Looking for APKs ==="
+          find . -name "*.apk" -o -name "*.aab" 2>/dev/null | head -20
+          find /root -name "*.apk" 2>/dev/null | head -5 || true
 
-      - name: Find APK
-        id: find_apk
+      - name: Find and copy APK
+        id: apk
         run: |
-          APK=$(find . -name "*.apk" | head -1)
-          echo "apk_path=$APK" >> $GITHUB_OUTPUT
-          ls -lh $APK 2>/dev/null || echo "No APK found"
+          APK=$(find . -name "*.apk" 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            APK=$(find ~ -name "*.apk" 2>/dev/null | head -1)
+          fi
+          echo "Found: $APK"
+          if [ -n "$APK" ]; then
+            cp "$APK" ./exchange-app.apk
+            echo "found=true" >> $GITHUB_OUTPUT
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+          fi
 
-      - name: Upload APK artifact
-        if: steps.find_apk.outputs.apk_path != ''
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: exchange-app-${{ github.event.inputs.pin }}
-          path: ${{ steps.find_apk.outputs.apk_path }}
+          path: ./exchange-app.apk
+          if-no-files-found: warn
           retention-days: 30
