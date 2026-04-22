@@ -20,69 +20,75 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Install Bubblewrap
-        run: npm install -g @bubblewrap/cli
-
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       - name: Install SDK packages
-        run: |
-          sdkmanager "platforms;android-34" "build-tools;34.0.0"
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
 
-      - name: Build TWA APK
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Bubblewrap
+        run: npm install -g @bubblewrap/cli
+
+      - name: Create twa-manifest.json
         run: |
-          mkdir -p apk_build && cd apk_build
-          
-          # Init bubblewrap project
-          bubblewrap init \
-            --manifest "${{ github.event.inputs.base_url }}/manifest/${{ github.event.inputs.pin }}.json" \
-            --directory . \
+          cat > twa-manifest.json << MANIFEST
+          {
+            "packageId": "com.exchange.shop${{ github.event.inputs.pin }}",
+            "host": "$(echo '${{ github.event.inputs.base_url }}' | sed 's|https://||')",
+            "startUrl": "/pin/${{ github.event.inputs.pin }}",
+            "name": "${{ github.event.inputs.shop_name }}",
+            "launcherName": "${{ github.event.inputs.shop_name }}",
+            "display": "standalone",
+            "themeColor": "#4CAF50",
+            "backgroundColor": "#f4f7f6",
+            "enableNotifications": false,
+            "shortcuts": [],
+            "iconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
+            "maskableIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
+            "monochromeIconUrl": "${{ github.event.inputs.base_url }}/static/icon-192.png",
+            "appVersion": "1.0.0",
+            "appVersionCode": 1,
+            "signingMode": "none",
+            "generatorApp": "bubblewrap",
+            "webManifestUrl": "${{ github.event.inputs.base_url }}/manifest/${{ github.event.inputs.pin }}.json",
+            "fallbackType": "customtabs",
+            "features": {},
+            "alphaDependencies": {"enabled": false},
+            "enableSiteSettingsShortcut": true,
+            "minSdkVersion": 21,
+            "orientation": "default"
+          }
+          MANIFEST
+          cat twa-manifest.json
+
+      - name: Build APK
+        run: |
+          # Use bubblewrap build with existing manifest (skips init prompt)
+          bubblewrap build \
+            --manifest ./twa-manifest.json \
             --skipPwaValidation \
-            --noInput 2>&1 || true
+            2>&1
 
-          # Show what was generated
-          ls -la
-          cat twa-manifest.json 2>/dev/null || true
-
-          # Build
-          bubblewrap build --skipPwaValidation 2>&1 || true
-          
-          # Find any APK
-          echo "=== Looking for APKs ==="
-          find . -name "*.apk" -o -name "*.aab" 2>/dev/null | head -20
-          find /root -name "*.apk" 2>/dev/null | head -5 || true
-
-      - name: Find and copy APK
-        id: apk
-        run: |
-          APK=$(find . -name "*.apk" 2>/dev/null | head -1)
-          if [ -z "$APK" ]; then
-            APK=$(find ~ -name "*.apk" 2>/dev/null | head -1)
-          fi
-          echo "Found: $APK"
-          if [ -n "$APK" ]; then
-            cp "$APK" ./exchange-app.apk
-            echo "found=true" >> $GITHUB_OUTPUT
-          else
-            echo "found=false" >> $GITHUB_OUTPUT
-          fi
+          echo "=== Files ==="
+          find . -name "*.apk" -o -name "*.aab" 2>/dev/null
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: exchange-app-${{ github.event.inputs.pin }}
-          path: ./exchange-app.apk
+          path: |
+            **/*.apk
+            **/*.aab
           if-no-files-found: warn
           retention-days: 30
