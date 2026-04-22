@@ -117,8 +117,12 @@ jobs:
           </resources>
           STYLES
 
-          # Download icon
-          curl -sL "${BASE}/static/icon-192.png" -o app/src/main/res/mipmap-hdpi/ic_launcher.png || true
+          # Download icon - try tenant logo first, fallback to default
+          curl -sL "${BASE}/logo/${PIN}.jpg" -o app/src/main/res/mipmap-hdpi/ic_launcher.png 2>/dev/null ||           curl -sL "${BASE}/logo/${PIN}.png" -o app/src/main/res/mipmap-hdpi/ic_launcher.png 2>/dev/null ||           curl -sL "${BASE}/static/icon-192.png" -o app/src/main/res/mipmap-hdpi/ic_launcher.png 2>/dev/null ||           echo "Using placeholder icon" && convert -size 192x192 xc:#4CAF50 app/src/main/res/mipmap-hdpi/ic_launcher.png 2>/dev/null || true
+          # Verify icon exists
+          if [ ! -s "app/src/main/res/mipmap-hdpi/ic_launcher.png" ]; then
+            curl -sL "https://via.placeholder.com/192/4CAF50/ffffff.png" -o app/src/main/res/mipmap-hdpi/ic_launcher.png || true
+          fi
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-mdpi/ic_launcher.png || true
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xhdpi/ic_launcher.png || true
           cp app/src/main/res/mipmap-hdpi/ic_launcher.png app/src/main/res/mipmap-xxhdpi/ic_launcher.png || true
